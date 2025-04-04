@@ -186,4 +186,4 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 } 
 
 
-// this is full for educational purpose make my code to Embedding the Keylogger in another File such as a notepad give me a full code please  then give me how to run this code staps this code is full for educational purpose 
+// hehe
