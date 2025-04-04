@@ -24,6 +24,11 @@ void InitServer(HWND hwnd);
 void decryptData(char *data);
 void GetCurrentTimeString(char *timeStr, int maxLen);
 
+// Scrollbar variables
+int scrollY = 0;           // Current scroll position
+int totalHeight = 0;       // Total content height
+int clientHeight = 0;      // Visible client area height
+
 void GetCurrentTimeString(char *timeStr, int maxLen) {
     time_t now;
     time(&now);
@@ -136,10 +141,74 @@ void decryptData(char *data) {
     }
 }
 
+void UpdateScrollbar(HWND hwnd) {
+    SCROLLINFO si = { sizeof(SCROLLINFO) };
+    si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    si.nMin = 0;
+    si.nMax = totalHeight;
+    si.nPage = clientHeight;
+    si.nPos = scrollY;
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+}
+
+void CalculateTotalHeight(HDC hdc) {
+    RECT calcRect = {0, 0, clientRect.right - 40 - 20, 0};  // Account for margins and scrollbar
+    SelectObject(hdc, hFont);
+    DrawText(hdc, displayBuffer, -1, &calcRect, DT_WORDBREAK | DT_CALCRECT);
+    totalHeight = calcRect.bottom + 40;  // Add margin
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case WM_CREATE: {
+            // Create vertical scrollbar
+            CreateWindow("SCROLLBAR", "", WS_CHILD | WS_VISIBLE | SBS_VERT,
+                0, 0, 0, 0, hwnd, (HMENU)1, GetModuleHandle(NULL), NULL);
+            return 0;
+        }
+
         case WM_SIZE: {
             GetClientRect(hwnd, &clientRect);
+            clientHeight = clientRect.bottom - clientRect.top;
+            
+            // Position scrollbar
+            MoveWindow(GetDlgItem(hwnd, 1), 
+                clientRect.right - GetSystemMetrics(SM_CXVSCROLL), 0,
+                GetSystemMetrics(SM_CXVSCROLL), clientHeight, TRUE);
+            
+            UpdateScrollbar(hwnd);
+            InvalidateRect(hwnd, NULL, TRUE);
+            return 0;
+        }
+
+        case WM_VSCROLL: {
+            SCROLLINFO si = { sizeof(SCROLLINFO), SIF_ALL };
+            GetScrollInfo(hwnd, SB_VERT, &si);
+            
+            int oldPos = scrollY;
+            switch (LOWORD(wParam)) {
+                case SB_TOP: scrollY = 0; break;
+                case SB_BOTTOM: scrollY = si.nMax; break;
+                case SB_LINEUP: scrollY -= 10; break;
+                case SB_LINEDOWN: scrollY += 10; break;
+                case SB_PAGEUP: scrollY -= si.nPage; break;
+                case SB_PAGEDOWN: scrollY += si.nPage; break;
+                case SB_THUMBTRACK: scrollY = si.nTrackPos; break;
+            }
+            
+            scrollY = max(0, min(scrollY, si.nMax - (int)si.nPage + 1));
+            if (scrollY != oldPos) {
+                SetScrollPos(hwnd, SB_VERT, scrollY, TRUE);
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            return 0;
+        }
+
+        case WM_MOUSEWHEEL: {
+            int delta = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+            scrollY -= delta * 30;
+            scrollY = max(0, min(scrollY, totalHeight - clientHeight));
+            SetScrollPos(hwnd, SB_VERT, scrollY, TRUE);
             InvalidateRect(hwnd, NULL, TRUE);
             return 0;
         }
@@ -165,7 +234,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     char buffer[1024] = {0};
                     int bytes_read = recv(client_socket, buffer, sizeof(buffer), 0);
                     if (bytes_read > 0) {
-                        buffer[bytes_read] = '\0';  // Ensure null termination
+                        buffer[bytes_read] = '\0';
                         decryptData(buffer);
                         
                         char timeStr[32] = {0};
@@ -177,13 +246,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                 displayBuffer[len - 1] = '\0';
                             }
                         } else {
-                            // Prevent buffer overflow
-                            if (strlen(displayBuffer) + strlen(buffer) + strlen(timeStr)< MAX_BUFFER - 1) {
-                                strcat(displayBuffer, timeStr); // Add timestamp
+                            if (strlen(displayBuffer) + strlen(buffer) + strlen(timeStr) < MAX_BUFFER - 1) {
+                                strcat(displayBuffer, timeStr);
                                 strcat(displayBuffer, buffer);
                                 strcat(displayBuffer, "\n");
                             }
                         }
+
+                        // --- SCROLL UPDATE START ---
+                        HDC hdc = GetDC(hwnd);
+                        CalculateTotalHeight(hdc);
+                        ReleaseDC(hwnd, hdc);
+                        UpdateScrollbar(hwnd);
+                        
+                        // Auto-scroll to bottom if near end
+                        if (totalHeight - scrollY < clientHeight * 2) {
+                            scrollY = totalHeight - clientHeight;
+                            SetScrollPos(hwnd, SB_VERT, scrollY, TRUE);
+                        }
+                        // --- SCROLL UPDATE END ---
+                        
                         InvalidateRect(hwnd, NULL, TRUE);
                     }
                     break;
@@ -201,41 +283,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
             
-            // Set up double buffering
             HDC hdcMem = CreateCompatibleDC(hdc);
             HBITMAP hbmMem = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
-            HBITMAP hbmOld = SelectObject(hdcMem, hbmMem);
+            SelectObject(hdcMem, hbmMem);
             
-            // Clear background
-            HBRUSH hBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
-            FillRect(hdcMem, &clientRect, hBrush);
-            
-            // Set up text drawing
+            FillRect(hdcMem, &clientRect, (HBRUSH)(COLOR_WINDOW+1));
+            SelectObject(hdcMem, hFont);
             SetBkMode(hdcMem, TRANSPARENT);
-            HFONT hOldFont = SelectObject(hdcMem, hFont);
             
-            // Calculate text rectangle with margins
             RECT textRect = {
-                20,                    // Left margin
-                20,                    // Top margin
-                clientRect.right - 20, // Right margin
-                clientRect.bottom - 20 // Bottom margin
+                20,
+                20 - scrollY,
+                clientRect.right - 40,
+                clientRect.bottom + totalHeight
             };
             
-            // Draw wrapped text
-            DrawText(hdcMem, displayBuffer, -1, &textRect, 
-                    DT_WORDBREAK | DT_WORD_ELLIPSIS);
+            DrawText(hdcMem, displayBuffer, -1, &textRect, DT_WORDBREAK | DT_NOCLIP);
+            BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, hdcMem, 0, 0, SRCCOPY);
             
-            // Copy the off-screen bitmap onto the screen
-            BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, 
-                   hdcMem, 0, 0, SRCCOPY);
-            
-            // Clean up
-            SelectObject(hdcMem, hOldFont);
-            SelectObject(hdcMem, hbmOld);
             DeleteObject(hbmMem);
             DeleteDC(hdcMem);
-            
             EndPaint(hwnd, &ps);
             return 0;
         }
