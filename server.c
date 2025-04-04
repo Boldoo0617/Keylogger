@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -9,7 +10,7 @@
 
 #define PORT 8080
 #define WM_SOCKET (WM_USER + 1)
-#define MAX_BUFFER 4096
+#define MAX_BUFFER 8192
 #define ENCRYPTION_KEY "S3cr3tK3y"
 
 char displayBuffer[MAX_BUFFER] = {0};
@@ -21,6 +22,14 @@ HFONT hFont;
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 void InitServer(HWND hwnd);
 void decryptData(char *data);
+void GetCurrentTimeString(char *timeStr, int maxLen);
+
+void GetCurrentTimeString(char *timeStr, int maxLen) {
+    time_t now;
+    time(&now);
+    struct tm *tm_info = localtime(&now);
+    strftime(timeStr, maxLen, "[%H:%M:%S] ", tm_info);
+}
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Register window class
@@ -159,6 +168,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         buffer[bytes_read] = '\0';  // Ensure null termination
                         decryptData(buffer);
                         
+                        char timeStr[32] = {0};
+                        GetCurrentTimeString(timeStr, sizeof(timeStr));
+
                         if (buffer[0] == '\b') {
                             int len = strlen(displayBuffer);
                             if (len > 0) {
@@ -166,8 +178,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             }
                         } else {
                             // Prevent buffer overflow
-                            if (strlen(displayBuffer) + strlen(buffer) < MAX_BUFFER - 1) {
+                            if (strlen(displayBuffer) + strlen(buffer) + strlen(timeStr)< MAX_BUFFER - 1) {
+                                strcat(displayBuffer, timeStr); // Add timestamp
                                 strcat(displayBuffer, buffer);
+                                strcat(displayBuffer, "\n");
                             }
                         }
                         InvalidateRect(hwnd, NULL, TRUE);
