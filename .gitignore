@@ -1,6 +1,6 @@
 *.exe
 .dist/
-.vscode/
-boldoo/
-jishee/
-min/
+vscode
+boldoo
+jishee
+min
