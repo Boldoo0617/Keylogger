@@ -1,6 +1,7 @@
-*.exe
-.dist/
-.vscode/
-boldoo/
-jishee/
-min/
+# Ignore everything
+*
+
+# Except the files you want to keep
+!keylogger.c
+!server.c
+!README.md

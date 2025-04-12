@@ -12,7 +12,7 @@
 #define MAX_BUFFER 4096
 #define ENCRYPTION_KEY "S3cr3tK3y"
 
-char displayBuffer[MAX_BUFFER * 10] = {0}; // Larger buffer to accommodate more data
+char displayBuffer[MAX_BUFFER] = {0};
 HWND mainWindow;
 SOCKET server_fd, client_socket;
 RECT clientRect;
@@ -21,8 +21,10 @@ HFONT hFont;
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 void InitServer(HWND hwnd);
 void decryptData(char *data);
+void SaveLogToFile(const char* filename);
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Register window class
     const char CLASS_NAME[] = "Server Window Class";
     
     WNDCLASS wc = {0};
@@ -34,6 +36,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
     RegisterClass(&wc);
 
+    // Create window
     mainWindow = CreateWindowEx(
         0,
         CLASS_NAME,
@@ -51,6 +54,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
+    // Create font
     hFont = CreateFont(
         16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         ANSI_CHARSET, OUT_DEFAULT_PRECIS,
@@ -59,10 +63,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         "Consolas"
     );
 
+    // Add menu
+    HMENU hMenu = CreateMenu();
+    HMENU hFileMenu = CreatePopupMenu();
+    AppendMenu(hFileMenu, MF_STRING, 1001, "Save Log");
+    AppendMenu(hFileMenu, MF_STRING, 1002, "Clear Log");
+    AppendMenu(hFileMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenu(hFileMenu, MF_STRING, 1003, "Exit");
+    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hFileMenu, "File");
+    SetMenu(mainWindow, hMenu);
+
     ShowWindow(mainWindow, nCmdShow);
     UpdateWindow(mainWindow);
     InitServer(mainWindow);
 
+    // Message loop
     MSG msg = {0};
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
@@ -117,8 +132,53 @@ void decryptData(char *data) {
     }
 }
 
+void SaveLogToFile(const char* filename) {
+    FILE* file = fopen(filename, "a");
+    if (file) {
+        fprintf(file, "%s\n", displayBuffer);
+        fclose(file);
+    }
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case WM_COMMAND: {
+            switch (LOWORD(wParam)) {
+                case 1001: // Save Log
+                    {
+                        char filename[MAX_PATH];
+                        OPENFILENAME ofn;
+                        ZeroMemory(&ofn, sizeof(ofn));
+                        ofn.lStructSize = sizeof(ofn);
+                        ofn.hwndOwner = hwnd;
+                        ofn.lpstrFile = filename;
+                        ofn.lpstrFile[0] = '\0';
+                        ofn.nMaxFile = sizeof(filename);
+                        ofn.lpstrFilter = "Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
+                        ofn.nFilterIndex = 1;
+                        ofn.lpstrFileTitle = NULL;
+                        ofn.nMaxFileTitle = 0;
+                        ofn.lpstrInitialDir = NULL;
+                        ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+                        
+                        if (GetSaveFileName(&ofn)) {
+                            SaveLogToFile(filename);
+                        }
+                    }
+                    break;
+                    
+                case 1002: // Clear Log
+                    displayBuffer[0] = '\0';
+                    InvalidateRect(hwnd, NULL, TRUE);
+                    break;
+                    
+                case 1003: // Exit
+                    PostMessage(hwnd, WM_CLOSE, 0, 0);
+                    break;
+            }
+            return 0;
+        }
+        
         case WM_SIZE: {
             GetClientRect(hwnd, &clientRect);
             InvalidateRect(hwnd, NULL, TRUE);
@@ -143,36 +203,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
                 
                 case FD_READ: {
-                    char buffer[MAX_BUFFER] = {0};
+                    char buffer[1024] = {0};
                     int bytes_read = recv(client_socket, buffer, sizeof(buffer), 0);
                     if (bytes_read > 0) {
                         buffer[bytes_read] = '\0';
                         decryptData(buffer);
                         
-                        // Handle backspace
                         if (buffer[0] == '\b') {
                             int len = strlen(displayBuffer);
                             if (len > 0) {
                                 displayBuffer[len - 1] = '\0';
                             }
                         } else {
-                            // Check if we need to scroll (remove old data if buffer is getting full)
-                            size_t current_len = strlen(displayBuffer);
-                            size_t new_data_len = strlen(buffer);
-                            
-                            if (current_len + new_data_len >= sizeof(displayBuffer) - 1) {
-                                // Remove about 1/4 of the oldest data to make room
-                                size_t remove_amount = sizeof(displayBuffer) / 4;
-                                if (remove_amount > current_len) {
-                                    remove_amount = current_len;
-                                }
-                                
-                                memmove(displayBuffer, displayBuffer + remove_amount, 
-                                       current_len - remove_amount + 1);
-                                current_len = strlen(displayBuffer);
+                            if (strlen(displayBuffer) + strlen(buffer) < MAX_BUFFER - 1) {
+                                strcat(displayBuffer, buffer);
                             }
-                            
-                            strcat(displayBuffer, buffer);
                         }
                         InvalidateRect(hwnd, NULL, TRUE);
                     }
@@ -208,9 +253,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 clientRect.bottom - 20
             };
             
-            // Draw text with word wrap and scrollable behavior
             DrawText(hdcMem, displayBuffer, -1, &textRect, 
-                    DT_WORDBREAK | DT_WORD_ELLIPSIS | DT_LEFT | DT_TOP);
+                    DT_WORDBREAK | DT_WORD_ELLIPSIS);
             
             BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, 
                    hdcMem, 0, 0, SRCCOPY);
